@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="聞き流し論証" />
+<title>聞き流し論証</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+<link rel="stylesheet" href="player.css" />
+</head>
+<body>
+<div id="app">
+  <header class="app-header">
+    <h1>🎧 聞き流し論証</h1>
+    <nav class="tabs">
+      <button class="tab-btn active" data-view="player">プレイヤー</button>
+      <button class="tab-btn" data-view="library">ライブラリ</button>
+    </nav>
+  </header>
+
+  <!-- プレイヤー -->
+  <section id="view-player" class="view">
+    <div id="player-empty" class="empty-hint hidden">
+      まだ音声がありません。<br />「ライブラリ」タブからパック(.kkpack)を取り込んでください。
+    </div>
+    <div id="player-main" class="hidden">
+      <div class="queue-row">
+        <select id="queue-subject"></select>
+      </div>
+      <div class="now-playing">
+        <div id="now-subject" class="now-subject"></div>
+        <div id="now-title" class="now-title"></div>
+      </div>
+      <div id="now-body" class="now-body"></div>
+      <div class="seek-row">
+        <span id="time-current" class="time">0:00</span>
+        <input type="range" id="seekbar" min="0" max="100" step="0.1" value="0" />
+        <span id="time-total" class="time">0:00</span>
+      </div>
+      <div class="controls">
+        <button id="prev-btn" class="ctrl-btn" title="前へ">⏮</button>
+        <button id="play-btn" class="ctrl-btn play" title="再生/一時停止">▶</button>
+        <button id="next-btn" class="ctrl-btn" title="次へ">⏭</button>
+      </div>
+      <div class="option-row">
+        <button id="shuffle-btn" class="opt-btn" title="シャッフル">🔀 シャッフル</button>
+        <button id="speed-btn" class="opt-btn" title="再生速度">1.0x</button>
+        <button id="repeat-btn" class="opt-btn" title="全体リピート">🔁 リピート</button>
+      </div>
+      <ol id="queue-list" class="queue-list"></ol>
+    </div>
+  </section>
+
+  <!-- ライブラリ -->
+  <section id="view-library" class="view hidden">
+    <label class="file-btn big">📥 パック(.kkpack)を取り込む<input type="file" id="pack-input" multiple /></label>
+    <p class="hint">Google Driveの「聞き流し音声/packs」からファイルを選んでください。同じ科目は丸ごと入れ替わります。</p>
+    <p id="import-status" class="hint"></p>
+    <ul id="library-list" class="library-list"></ul>
+    <p id="storage-info" class="hint"></p>
+    <hr />
+    <div class="update-row">
+      <button id="update-check-btn" class="opt-btn">アプリの更新を確認</button>
+      <span id="update-status" class="hint"></span>
+    </div>
+    <p class="hint version-line">聞き流し論証プレイヤー v1</p>
+  </section>
+</div>
+<audio id="audio" preload="auto" playsinline></audio>
+<script src="player.js"></script>
+</body>
+</html>

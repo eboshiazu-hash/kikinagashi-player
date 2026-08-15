@@ -1,0 +1,6 @@
+# 論証データ・音声は絶対にコミットしない(このリポジトリは公開)
+*.kkpack
+*.mp3
+*.wav
+*.json.bak
+speech_export*.json
