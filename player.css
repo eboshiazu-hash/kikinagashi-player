@@ -88,7 +88,14 @@ body {
 .ctrl-btn.play { width: 76px; height: 76px; font-size: 2rem; background: var(--accent); color: var(--accent-contrast); border: none; }
 .ctrl-btn:active { filter: brightness(0.9); }
 
-.option-row { display: flex; justify-content: center; gap: 8px; margin: 10px 0 14px; flex-wrap: wrap; }
+.option-row { display: flex; justify-content: center; gap: 8px; margin: 10px 0 6px; flex-wrap: wrap; }
+.speed-row { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 0 0 14px; }
+.speed-label { font-size: 0.8rem; color: var(--text-muted); margin-right: 2px; }
+.speed-btn {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+  border-radius: 20px; padding: 8px 12px; font-size: 0.85rem; cursor: pointer; min-width: 58px;
+}
+.speed-btn.on { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); font-weight: 600; }
 .opt-btn {
   border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
   border-radius: 20px; padding: 8px 14px; font-size: 0.85rem; cursor: pointer;

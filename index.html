@@ -49,8 +49,14 @@
       </div>
       <div class="option-row">
         <button id="shuffle-btn" class="opt-btn" title="シャッフル">🔀 シャッフル</button>
-        <button id="speed-btn" class="opt-btn" title="再生速度">1.0x</button>
         <button id="repeat-btn" class="opt-btn" title="全体リピート">🔁 リピート</button>
+      </div>
+      <div class="speed-row">
+        <span class="speed-label">速度</span>
+        <button class="speed-btn" data-speed="0.75">0.75x</button>
+        <button class="speed-btn" data-speed="1">1.0x</button>
+        <button class="speed-btn" data-speed="1.25">1.25x</button>
+        <button class="speed-btn" data-speed="1.5">1.5x</button>
       </div>
       <ol id="queue-list" class="queue-list"></ol>
     </div>
@@ -59,7 +65,8 @@
   <!-- ライブラリ -->
   <section id="view-library" class="view hidden">
     <label class="file-btn big">📥 パック(.kkpack)を取り込む<input type="file" id="pack-input" multiple /></label>
-    <p class="hint">Google Driveの「聞き流し音声/packs」からファイルを選んでください。同じ科目は丸ごと入れ替わります。</p>
+    <p class="hint">ファイル選択画面で「ブラウズ」→「Google Drive」→「聞き流し音声 > packs」からファイルを選んでください(iCloudへのコピーは不要です)。同じ科目は丸ごと入れ替わります。</p>
+    <p class="hint">Google Driveが出てこない場合: 「ファイル」アプリ →「ブラウズ」→ 右上「…」→「サイドバーを編集」で Google Drive をオンにしてください(初回のみ)。</p>
     <p id="import-status" class="hint"></p>
     <ul id="library-list" class="library-list"></ul>
     <p id="storage-info" class="hint"></p>
@@ -68,7 +75,7 @@
       <button id="update-check-btn" class="opt-btn">アプリの更新を確認</button>
       <span id="update-status" class="hint"></span>
     </div>
-    <p class="hint version-line">聞き流し論証プレイヤー v1</p>
+    <p class="hint version-line">聞き流し論証プレイヤー v2</p>
   </section>
 </div>
 <audio id="audio" preload="auto" playsinline></audio>

@@ -319,11 +319,14 @@ function wirePlayer() {
     localStorage.setItem("kkp_repeat", repeatOn ? "1" : "0");
     renderOptionButtons();
   });
-  document.getElementById("speed-btn").addEventListener("click", () => {
-    speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
-    localStorage.setItem("kkp_speed", String(speed));
-    audio.playbackRate = speed;
-    renderOptionButtons();
+  // 速度は4ボタンから直接選択(巡回式だと目的の速度に行くまで別速度を経由して聞き逃すため)
+  document.querySelectorAll(".speed-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      speed = Number(btn.dataset.speed);
+      localStorage.setItem("kkp_speed", String(speed));
+      audio.playbackRate = speed;
+      renderOptionButtons();
+    });
   });
 
   const seekbar = document.getElementById("seekbar");
@@ -379,9 +382,9 @@ function renderPlayerAvailability() {
 function renderOptionButtons() {
   document.getElementById("shuffle-btn").classList.toggle("on", shuffleOn);
   document.getElementById("repeat-btn").classList.toggle("on", repeatOn);
-  const speedBtn = document.getElementById("speed-btn");
-  speedBtn.textContent = speed.toFixed(2).replace(/0$/, "") + "x";
-  speedBtn.classList.toggle("on", speed !== 1.0);
+  document.querySelectorAll(".speed-btn").forEach((btn) => {
+    btn.classList.toggle("on", Number(btn.dataset.speed) === speed);
+  });
 }
 
 function renderPlayButton(playing) {
