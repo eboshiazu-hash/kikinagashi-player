@@ -104,7 +104,7 @@ let queue = [];       // 現在の再生キュー(トラックの配列)
 let currentIdx = -1;
 let speed = 1.0;
 let shuffleOn = false;
-let repeatOn = true;  // 聞き流し用途なのでリピートは既定でON
+let repeatMode = "all"; // "all"(全体リピート・既定) | "one"(1曲リピート) | "off"
 const urlCache = new Map(); // trackId -> blob URL(セッション中は保持。endedハンドラを同期に保つため)
 const audio = document.getElementById("audio");
 
@@ -128,7 +128,8 @@ function urlFor(track) {
   speed = Number(localStorage.getItem("kkp_speed")) || 1.0;
   if (!SPEEDS.includes(speed)) speed = 1.0;
   shuffleOn = localStorage.getItem("kkp_shuffle") === "1";
-  repeatOn = localStorage.getItem("kkp_repeat") !== "0";
+  repeatMode = localStorage.getItem("kkp_repeatMode") || "all";
+  if (!["all", "one", "off"].includes(repeatMode)) repeatMode = "all";
 
   wireNav();
   wireLibrary();
@@ -314,9 +315,10 @@ function wirePlayer() {
     rebuildQueue(true);
     renderOptionButtons();
   });
+  // リピートは 全体 → 1曲 → オフ の3段階切替(1つの論証を集中して覚えたいときは「1曲」)
   document.getElementById("repeat-btn").addEventListener("click", () => {
-    repeatOn = !repeatOn;
-    localStorage.setItem("kkp_repeat", repeatOn ? "1" : "0");
+    repeatMode = repeatMode === "all" ? "one" : repeatMode === "one" ? "off" : "all";
+    localStorage.setItem("kkp_repeatMode", repeatMode);
     renderOptionButtons();
   });
   // 速度は4ボタンから直接選択(巡回式だと目的の速度に行くまで別速度を経由して聞き逃すため)
@@ -354,9 +356,13 @@ function wirePlayer() {
 
   // ★ 連続再生の核心。バックグラウンドでも次トラックへ進めるよう、ここは同期処理のみにする。
   audio.addEventListener("ended", () => {
-    if (currentIdx + 1 < queue.length) {
+    if (repeatMode === "one" && currentIdx >= 0) {
+      audio.currentTime = 0;
+      const p = audio.play();
+      if (p) p.catch(() => renderPlayButton(false));
+    } else if (currentIdx + 1 < queue.length) {
       playTrackAt(currentIdx + 1);
-    } else if (repeatOn && queue.length > 0) {
+    } else if (repeatMode === "all" && queue.length > 0) {
       playTrackAt(0);
     } else {
       renderPlayButton(false);
@@ -381,7 +387,9 @@ function renderPlayerAvailability() {
 
 function renderOptionButtons() {
   document.getElementById("shuffle-btn").classList.toggle("on", shuffleOn);
-  document.getElementById("repeat-btn").classList.toggle("on", repeatOn);
+  const repeatBtn = document.getElementById("repeat-btn");
+  repeatBtn.textContent = repeatMode === "one" ? "🔂 1曲リピート" : "🔁 リピート";
+  repeatBtn.classList.toggle("on", repeatMode !== "off");
   document.querySelectorAll(".speed-btn").forEach((btn) => {
     btn.classList.toggle("on", Number(btn.dataset.speed) === speed);
   });
@@ -440,7 +448,7 @@ function playTrackAt(idx) {
   const p = audio.play();
   if (p) p.catch(() => renderPlayButton(false)); // 自動再生がブロックされた場合はボタン表示だけ戻す
   // 次のトラックのblob URLを先に作っておく(ended時の処理を確実に同期で済ませるため)
-  const next = queue[idx + 1] || (repeatOn ? queue[0] : null);
+  const next = queue[idx + 1] || (repeatMode === "all" ? queue[0] : null);
   if (next) urlFor(next);
   localStorage.setItem("kkp_lastTrackId", t.id);
   localStorage.setItem("kkp_lastPos", "0");
@@ -487,9 +495,10 @@ function stepTrack(dir) {
     audio.currentTime = 0;
     return;
   }
+  const wrap = repeatMode !== "off";
   let next = currentIdx + dir;
-  if (next < 0) next = repeatOn ? queue.length - 1 : 0;
-  if (next >= queue.length) next = repeatOn ? 0 : queue.length - 1;
+  if (next < 0) next = wrap ? queue.length - 1 : 0;
+  if (next >= queue.length) next = wrap ? 0 : queue.length - 1;
   playTrackAt(next);
 }
 
