@@ -456,7 +456,7 @@ function updateNowPlaying(t) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title,
       artist: t.subject,
-      album: "聞き流し論証",
+      album: "Listening",
       artwork: [
         { src: "icon-192.png", sizes: "192x192", type: "image/png" },
         { src: "icon-512.png", sizes: "512x512", type: "image/png" },
