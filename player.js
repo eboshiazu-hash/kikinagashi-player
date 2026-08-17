@@ -200,16 +200,23 @@ async function importPack(file) {
   const header = JSON.parse(await file.slice(10, 10 + headerLen).text());
   const dataStart = 10 + headerLen;
   const subject = header.subject || "科目未設定";
-  const records = (header.tracks || []).map((t) => ({
-    id: t.id,
-    subject,
-    order: t.order || 0,
-    title: t.title || "無題",
-    body: t.body || "",
-    generatedAt: header.generatedAt || "",
-    blob: file.slice(dataStart + t.offset, dataStart + t.offset + t.length, t.mime || "audio/mpeg"),
-  }));
-  if (records.length === 0) throw new Error(`${file.name} にトラックがありません`);
+  const tracks = header.tracks || [];
+  if (tracks.length === 0) throw new Error(`${file.name} にトラックがありません`);
+  const records = [];
+  for (const t of tracks) {
+    // File.slice(遅延参照)のままIndexedDBへ入れると、iOS Safariが保存後に切り出し範囲を
+    // 失い全トラックが先頭(1番目)の音声を指すことがある。実バイトに読み出してから保存する。
+    const bytes = await file.slice(dataStart + t.offset, dataStart + t.offset + t.length).arrayBuffer();
+    records.push({
+      id: t.id,
+      subject,
+      order: t.order || 0,
+      title: t.title || "無題",
+      body: t.body || "",
+      generatedAt: header.generatedAt || "",
+      blob: new Blob([bytes], { type: t.mime || "audio/mpeg" }),
+    });
+  }
   await dbDeleteSubject(subject);
   await dbPutAll(records);
 }
@@ -355,6 +362,13 @@ function wirePlayer() {
   });
   audio.addEventListener("play", () => renderPlayButton(true));
   audio.addEventListener("pause", () => renderPlayButton(false));
+  // 音声の読み込み失敗を無音で放置しない(データ破損時に気づけるようにする)
+  audio.addEventListener("error", () => {
+    if (currentIdx < 0) return;
+    renderPlayButton(false);
+    document.getElementById("now-body").textContent =
+      "この音声を再生できませんでした。ライブラリで科目を削除し、パックを取り込み直してください。";
+  });
 
   // ★ 連続再生の核心。バックグラウンドでも次トラックへ進めるよう、ここは同期処理のみにする。
   audio.addEventListener("ended", () => {
