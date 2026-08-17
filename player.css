@@ -78,7 +78,7 @@ body {
 .seek-row .time { font-size: 0.75rem; color: var(--text-muted); min-width: 36px; text-align: center; }
 #seekbar { flex: 1; accent-color: var(--accent); height: 24px; }
 
-.controls { display: flex; justify-content: center; align-items: center; gap: 22px; margin: 8px 0; }
+.controls { display: flex; justify-content: center; align-items: center; gap: 12px; margin: 8px 0; }
 .ctrl-btn {
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   border-radius: 50%; width: 58px; height: 58px; font-size: 1.5rem; cursor: pointer;
@@ -86,6 +86,7 @@ body {
   padding: 0; line-height: 1;
 }
 .ctrl-btn.play { width: 76px; height: 76px; font-size: 2rem; background: var(--accent); color: var(--accent-contrast); border: none; }
+.ctrl-btn.skip { width: 46px; height: 46px; font-size: 0.95rem; color: var(--text-muted); }
 .ctrl-btn:active { filter: brightness(0.9); }
 
 .option-row { display: flex; justify-content: center; gap: 8px; margin: 10px 0 6px; flex-wrap: wrap; }

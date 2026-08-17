@@ -308,6 +308,8 @@ function wirePlayer() {
   document.getElementById("play-btn").addEventListener("click", togglePlay);
   document.getElementById("next-btn").addEventListener("click", () => stepTrack(1));
   document.getElementById("prev-btn").addEventListener("click", () => stepTrack(-1));
+  document.getElementById("back5-btn").addEventListener("click", () => seekBy(-5));
+  document.getElementById("fwd5-btn").addEventListener("click", () => seekBy(5));
 
   document.getElementById("shuffle-btn").addEventListener("click", () => {
     shuffleOn = !shuffleOn;
@@ -500,6 +502,14 @@ function stepTrack(dir) {
   if (next < 0) next = wrap ? queue.length - 1 : 0;
   if (next >= queue.length) next = wrap ? 0 : queue.length - 1;
   playTrackAt(next);
+}
+
+// 現在のトラック内で相対シークする(トラックはまたがない。末尾は少し手前で止めてendedの誤発火を避ける)。
+function seekBy(delta) {
+  if (currentIdx < 0 || !isFinite(audio.duration)) return;
+  audio.currentTime = Math.min(Math.max(audio.currentTime + delta, 0), Math.max(audio.duration - 0.3, 0));
+  updateSeekUI();
+  updatePositionState();
 }
 
 function stopPlayback() {
