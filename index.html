@@ -34,7 +34,10 @@
       </div>
       <div class="now-playing">
         <div id="now-subject" class="now-subject"></div>
-        <div id="now-title" class="now-title"></div>
+        <div class="now-title-row">
+          <div id="now-title" class="now-title"></div>
+          <button id="fav-btn" class="fav-btn" title="お気に入りに追加/解除" aria-pressed="false">☆</button>
+        </div>
       </div>
       <div id="now-body" class="now-body"></div>
       <div class="seek-row">
@@ -78,7 +81,7 @@
       <button id="update-check-btn" class="opt-btn">アプリの更新を確認</button>
       <span id="update-status" class="hint"></span>
     </div>
-    <p class="hint version-line">Listening v7</p>
+    <p class="hint version-line">Listening v8</p>
   </section>
 </div>
 <audio id="audio" preload="auto" playsinline></audio>

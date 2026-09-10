@@ -13,8 +13,9 @@
 
 /* ---------- IndexedDB ---------- */
 const DB_NAME = "kikinagashiPlayerDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: favorites ストア追加(2026-09-10)
 const STORE = "tracks";
+const FAV_STORE = "favorites"; // {id, addedAt}。トラックとは別ストアなので、パックを取り込み直しても消えない
 let db;
 
 function openDB() {
@@ -24,6 +25,9 @@ function openDB() {
       if (event.oldVersion < 1) {
         const store = req.result.createObjectStore(STORE, { keyPath: "id" });
         store.createIndex("subject", "subject");
+      }
+      if (event.oldVersion < 2) {
+        req.result.createObjectStore(FAV_STORE, { keyPath: "id" });
       }
     };
     req.onblocked = () => alert("別のタブでこのアプリが開かれています。他のタブを閉じて再読み込みしてください。");
@@ -76,6 +80,25 @@ function dbDeleteSubject(subject) {
   });
 }
 
+function dbGetFavoriteIds() {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(FAV_STORE, "readonly").objectStore(FAV_STORE).getAllKeys();
+    req.onsuccess = () => resolve(new Set(req.result));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function dbSetFavorite(id, on) {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(FAV_STORE, "readwrite");
+    const store = t.objectStore(FAV_STORE);
+    if (on) store.put({ id, addedAt: new Date().toISOString() });
+    else store.delete(id);
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+  });
+}
+
 /* ---------- utils ---------- */
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -101,7 +124,10 @@ function shuffleArray(arr) {
 const SPEEDS = [0.75, 1.0, 1.25, 1.5];
 let allTracks = [];   // IndexedDBの全トラック(blob含む。blob実体はディスク側にあり必要時に読まれる)
 let queue = [];       // 現在の再生キュー(トラックの配列)
-let currentIdx = -1;
+let currentIdx = -1;  // queue内の再生位置。お気に入りを外した直後など、nowTrackがキューに無い間は -1 になりうる
+let nowTrack = null;  // いま画面に出ている(再生中の)トラック。queue[currentIdx]と別に持つ
+let favIds = new Set(); // お気に入りのトラックid(favoritesストアの写し)
+const FAV_QUEUE = "__fav__"; // 科目セレクトで「お気に入りだけ」を選んだときの値
 let speed = 1.0;
 let shuffleOn = false;
 let repeatMode = "all"; // "all"(全体リピート・既定) | "one"(1曲リピート) | "off"
@@ -124,6 +150,7 @@ function urlFor(track) {
   }
   db = await openDB();
   allTracks = await dbGetAll();
+  favIds = await dbGetFavoriteIds();
 
   speed = Number(localStorage.getItem("kkp_speed")) || 1.0;
   if (!SPEEDS.includes(speed)) speed = 1.0;
@@ -144,6 +171,7 @@ function renderAll() {
   renderSubjectSelect();
   renderPlayerAvailability();
   renderOptionButtons();
+  renderFavButton();
   renderStorageInfo();
 }
 
@@ -317,6 +345,7 @@ function wirePlayer() {
   document.getElementById("prev-btn").addEventListener("click", () => stepTrack(-1));
   document.getElementById("back5-btn").addEventListener("click", () => seekBy(-5));
   document.getElementById("fwd5-btn").addEventListener("click", () => seekBy(5));
+  document.getElementById("fav-btn").addEventListener("click", () => { toggleFavorite().catch(() => {}); });
 
   document.getElementById("shuffle-btn").addEventListener("click", () => {
     shuffleOn = !shuffleOn;
@@ -350,7 +379,7 @@ function wirePlayer() {
   audio.addEventListener("timeupdate", () => {
     updateSeekUI();
     const now = Date.now();
-    if (now - lastSaved > 5000 && currentIdx >= 0) {
+    if (now - lastSaved > 5000 && nowTrack) {
       lastSaved = now;
       localStorage.setItem("kkp_lastPos", String(audio.currentTime));
     }
@@ -364,7 +393,7 @@ function wirePlayer() {
   audio.addEventListener("pause", () => renderPlayButton(false));
   // 音声の読み込み失敗を無音で放置しない(データ破損時に気づけるようにする)
   audio.addEventListener("error", () => {
-    if (currentIdx < 0) return;
+    if (!nowTrack) return;
     renderPlayButton(false);
     document.getElementById("now-body").textContent =
       "この音声を再生できませんでした。ライブラリで科目を削除し、パックを取り込み直してください。";
@@ -372,7 +401,7 @@ function wirePlayer() {
 
   // ★ 連続再生の核心。バックグラウンドでも次トラックへ進めるよう、ここは同期処理のみにする。
   audio.addEventListener("ended", () => {
-    if (repeatMode === "one" && currentIdx >= 0) {
+    if (repeatMode === "one" && nowTrack) {
       audio.currentTime = 0;
       const p = audio.play();
       if (p) p.catch(() => renderPlayButton(false));
@@ -389,10 +418,16 @@ function wirePlayer() {
 function renderSubjectSelect() {
   const sel = document.getElementById("queue-subject");
   const subjects = subjectSummary().map(([s]) => s);
-  const saved = localStorage.getItem("kkp_subject") || "";
+  const saved = sel.value || localStorage.getItem("kkp_subject") || "";
+  const favCount = allTracks.filter((t) => favIds.has(t.id)).length;
   sel.innerHTML = '<option value="">すべての科目</option>' +
+    `<option value="${FAV_QUEUE}">★ お気に入りだけ(${favCount})</option>` +
     subjects.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
-  sel.value = subjects.includes(saved) ? saved : "";
+  sel.value = saved === FAV_QUEUE || subjects.includes(saved) ? saved : "";
+}
+
+function queueSubject() {
+  return document.getElementById("queue-subject").value;
 }
 
 function renderPlayerAvailability() {
@@ -420,9 +455,11 @@ function renderPlayButton(playing) {
 
 // キューを組み直す。keepCurrent=trueなら再生中のトラックを先頭/現位置に保って続行する。
 function rebuildQueue(keepCurrent) {
-  const subject = document.getElementById("queue-subject").value;
-  const current = currentIdx >= 0 ? queue[currentIdx] : null;
-  let list = allTracks.filter((t) => !subject || t.subject === subject);
+  const subject = queueSubject();
+  const current = nowTrack;
+  let list = subject === FAV_QUEUE
+    ? allTracks.filter((t) => favIds.has(t.id))
+    : allTracks.filter((t) => !subject || t.subject === subject);
   list.sort((a, b) => a.subject.localeCompare(b.subject) || (a.order || 0) - (b.order || 0) || a.title.localeCompare(b.title));
   if (shuffleOn) {
     list = shuffleArray(list);
@@ -443,20 +480,61 @@ function rebuildQueue(keepCurrent) {
 function renderQueueList() {
   const ol = document.getElementById("queue-list");
   ol.innerHTML = "";
+  if (queue.length === 0 && queueSubject() === FAV_QUEUE) {
+    ol.innerHTML = '<li class="hint">お気に入りはまだありません。再生中の論証のタイトル横にある ☆ を押すと追加されます。</li>';
+    return;
+  }
   queue.forEach((t, i) => {
     const li = document.createElement("li");
-    li.className = i === currentIdx ? "current" : "";
-    li.innerHTML = `<span class="q-num">${i + 1}</span><span>${escapeHtml(t.title)}</span>`;
+    li.className = nowTrack && t.id === nowTrack.id ? "current" : "";
+    const star = favIds.has(t.id) ? '<span class="q-fav">★</span>' : "";
+    li.innerHTML = `<span class="q-num">${i + 1}</span><span class="q-title">${escapeHtml(t.title)}</span>${star}`;
     li.addEventListener("click", () => playTrackAt(i));
     ol.appendChild(li);
   });
+}
+
+/* ---------- お気に入り ---------- */
+function renderFavButton() {
+  const btn = document.getElementById("fav-btn");
+  const on = !!(nowTrack && favIds.has(nowTrack.id));
+  btn.textContent = on ? "★" : "☆";
+  btn.classList.toggle("on", on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.classList.toggle("hidden", !nowTrack);
+}
+
+// 再生画面の ☆/★ で、いま流れている論証をお気に入りに入れる/外す。
+async function toggleFavorite() {
+  if (!nowTrack) return;
+  const t = nowTrack;
+  const on = !favIds.has(t.id);
+  if (on) favIds.add(t.id); else favIds.delete(t.id);
+  await dbSetFavorite(t.id, on);
+  if (queueSubject() === FAV_QUEUE) {
+    // 「お気に入りだけ」を聴いている最中は、キューを組み直さずその場で出し入れする
+    // (シャッフル順を崩さない。外した論証は最後まで流れ、次からはキューに含まれない)
+    if (on) {
+      const at = currentIdx + 1;
+      queue.splice(at, 0, t);
+      currentIdx = at;
+    } else {
+      const i = queue.findIndex((q) => q.id === t.id);
+      if (i >= 0) {
+        queue.splice(i, 1);
+        currentIdx = i - 1; // ended時に currentIdx+1 = 元の次の論証へ進む
+      }
+    }
+  }
+  renderFavButton();
+  renderSubjectSelect();
+  renderQueueList();
 }
 
 // idx番目のトラックを即座に再生する。endedハンドラからも呼ばれるため、この関数は同期で完結させる
 // (blob URLの生成は同期API。IndexedDBアクセスや動的importを挟んではいけない)。
 function playTrackAt(idx) {
   if (idx < 0 || idx >= queue.length) return;
-  const prev = currentIdx;
   currentIdx = idx;
   const t = queue[idx];
   audio.src = urlFor(t);
@@ -469,13 +547,15 @@ function playTrackAt(idx) {
   localStorage.setItem("kkp_lastTrackId", t.id);
   localStorage.setItem("kkp_lastPos", "0");
   updateNowPlaying(t);
-  if (prev !== idx) renderQueueList();
+  renderQueueList();
 }
 
 function updateNowPlaying(t) {
+  nowTrack = t;
   document.getElementById("now-subject").textContent = t.subject;
   document.getElementById("now-title").textContent = t.title;
   document.getElementById("now-body").textContent = t.body || "";
+  renderFavButton();
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title,
@@ -490,7 +570,7 @@ function updateNowPlaying(t) {
 }
 
 function togglePlay() {
-  if (currentIdx < 0) {
+  if (!nowTrack) {
     if (queue.length === 0) rebuildQueue();
     if (queue.length > 0) playTrackAt(0);
     return;
@@ -499,13 +579,13 @@ function togglePlay() {
     audio.play().catch(() => {});
   } else {
     audio.pause();
-    if (currentIdx >= 0) localStorage.setItem("kkp_lastPos", String(audio.currentTime));
+    localStorage.setItem("kkp_lastPos", String(audio.currentTime));
   }
 }
 
 function stepTrack(dir) {
   if (queue.length === 0) return;
-  if (currentIdx < 0) { playTrackAt(0); return; }
+  if (!nowTrack) { playTrackAt(0); return; }
   // 先頭で「前へ」を押したら曲頭に戻す(音楽プレイヤーの一般的な挙動に合わせて3秒以上再生時も曲頭へ)
   if (dir === -1 && audio.currentTime > 3) {
     audio.currentTime = 0;
@@ -520,7 +600,7 @@ function stepTrack(dir) {
 
 // 現在のトラック内で相対シークする(トラックはまたがない。末尾は少し手前で止めてendedの誤発火を避ける)。
 function seekBy(delta) {
-  if (currentIdx < 0 || !isFinite(audio.duration)) return;
+  if (!nowTrack || !isFinite(audio.duration)) return;
   audio.currentTime = Math.min(Math.max(audio.currentTime + delta, 0), Math.max(audio.duration - 0.3, 0));
   updateSeekUI();
   updatePositionState();
@@ -530,9 +610,11 @@ function stopPlayback() {
   audio.pause();
   audio.removeAttribute("src");
   currentIdx = -1;
+  nowTrack = null;
   document.getElementById("now-subject").textContent = "";
   document.getElementById("now-title").textContent = "";
   document.getElementById("now-body").textContent = "";
+  renderFavButton();
   renderPlayButton(false);
 }
 

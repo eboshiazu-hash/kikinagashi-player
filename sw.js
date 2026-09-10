@@ -2,7 +2,7 @@
 
 // アプリシェルのオフラインキャッシュ。音声データはIndexedDB側にあるためここでは扱わない。
 // 更新時はCACHE名のバージョンを上げること(古いキャッシュはactivateで削除される)。
-const CACHE = "kikinagashi-player-v8";
+const CACHE = "kikinagashi-player-v9";
 const ASSETS = [
   "./",
   "./index.html",

@@ -65,7 +65,14 @@ body {
 
 .now-playing { text-align: center; margin: 14px 0 4px; }
 .now-subject { font-size: 0.8rem; color: var(--text-muted); }
-.now-title { font-size: 1.1rem; font-weight: 700; margin-top: 2px; white-space: pre-wrap; }
+.now-title-row { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 2px; }
+.now-title { font-size: 1.1rem; font-weight: 700; white-space: pre-wrap; min-width: 0; }
+.fav-btn {
+  flex: none; border: none; background: none; cursor: pointer; padding: 0;
+  width: 44px; height: 44px; font-size: 1.6rem; line-height: 1; color: var(--text-muted);
+}
+.fav-btn.on { color: #e0a800; }
+.fav-btn:active { filter: brightness(0.85); }
 
 .now-body {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -111,6 +118,9 @@ body {
 .queue-list li .q-num { color: var(--text-muted); font-size: 0.75rem; min-width: 2em; }
 .queue-list li.current { color: var(--accent); font-weight: 700; }
 .queue-list li.current .q-num::before { content: "▶ "; }
+.queue-list li .q-title { flex: 1; }
+.queue-list li .q-fav { color: #e0a800; font-size: 0.85rem; }
+.queue-list li.hint { cursor: default; color: var(--text-muted); font-size: 0.85rem; }
 
 .file-btn {
   position: relative; overflow: hidden; display: inline-block;
