@@ -81,7 +81,12 @@
       <button id="update-check-btn" class="opt-btn">アプリの更新を確認</button>
       <span id="update-status" class="hint"></span>
     </div>
-    <p class="hint version-line">Listening v10</p>
+    <details class="switch-log-box">
+      <summary class="hint">切り替えログ(止まったときの調査用)</summary>
+      <pre id="switch-log" class="switch-log"></pre>
+      <button id="switch-log-clear" class="opt-btn">ログを消す</button>
+    </details>
+    <p class="hint version-line">Listening v11</p>
   </section>
 </div>
 <audio id="audio" preload="auto" playsinline></audio>

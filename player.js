@@ -9,6 +9,9 @@
      * endedハンドラでは同期処理だけで次トラックのsrc差し替え+play()を行う
        (awaitを挟むとバックグラウンドで再生権を失うことがある)
      * blob URLは事前に作成してキャッシュしておく
+     * 次のトラックの音声データは再生中にメモリへ読み込んでおく(v11・2026-09-13)。
+       IndexedDBのblobはディスク側にあり、切り替えの瞬間に読み出すと空白が伸びるため
+     * 切り替えの成否をlocalStorageに記録し、ライブラリ画面で見られるようにする(不具合調査用)
    ========================================================= */
 
 /* ---------- IndexedDB ---------- */
@@ -143,6 +146,72 @@ function urlFor(track) {
   return url;
 }
 
+/* ---------- 次トラックのメモリ先読み ---------- */
+// IndexedDBから取り出したblobは実体がディスク側にあるため、切り替えの瞬間に初めて読むと
+// 読み出し待ちの空白ができる。再生中に次トラックのバイト列をメモリへ読み込み、
+// そのメモリ上のblobからblob URLを作り直しておく(ended時の処理は従来どおり同期のまま)。
+const memBlobs = new Map();   // trackId -> メモリ上のBlob(現在・次の2件だけ保持)
+const preloading = new Set(); // 読み込み中のtrackId
+async function preloadIntoMemory(track) {
+  if (!track || memBlobs.has(track.id) || preloading.has(track.id)) return;
+  preloading.add(track.id);
+  try {
+    const buf = await track.blob.arrayBuffer();
+    const mem = new Blob([buf], { type: track.blob.type || "audio/mpeg" });
+    memBlobs.set(track.id, mem);
+    if (!nowTrack || nowTrack.id !== track.id) { // 再生中のトラックのURLは差し替えない
+      const old = urlCache.get(track.id);
+      if (old) URL.revokeObjectURL(old);
+      urlCache.set(track.id, URL.createObjectURL(mem));
+    }
+  } catch { /* 読めなければ従来どおりディスク側のblobで再生する */ }
+  finally { preloading.delete(track.id); }
+}
+// 現在と次のトラック以外のメモリ上のblobを捨てる(URLも作り直せるので消してよい)。
+function trimMemory(keepIds) {
+  for (const id of [...memBlobs.keys()]) {
+    if (keepIds.includes(id)) continue;
+    memBlobs.delete(id);
+    const url = urlCache.get(id);
+    if (url) { URL.revokeObjectURL(url); urlCache.delete(id); }
+  }
+}
+
+/* ---------- 切り替えログ(不具合調査用) ---------- */
+// 自動切り替え(ended→次トラック)のたびに1行記録し、play()の結果とplayingイベントの到達を追記する。
+const SWITCH_LOG_KEY = "kkp_switchLog";
+let switchLogT0 = 0;
+function readSwitchLog() {
+  try { return JSON.parse(localStorage.getItem(SWITCH_LOG_KEY) || "[]"); } catch { return []; }
+}
+function writeSwitchLog(arr) {
+  try { localStorage.setItem(SWITCH_LOG_KEY, JSON.stringify(arr.slice(-40))); } catch { /* 容量超過などは無視 */ }
+}
+function logSwitch(track) {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0"), mm = String(d.getMinutes()).padStart(2, "0"), ss = String(d.getSeconds()).padStart(2, "0");
+  switchLogT0 = Date.now();
+  const arr = readSwitchLog();
+  arr.push({ at: `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}:${ss}`, bg: document.hidden ? 1 : 0, mem: memBlobs.has(track.id) ? 1 : 0, to: track.title.slice(0, 14), r: "-" });
+  writeSwitchLog(arr);
+}
+function setSwitchResult(text) {
+  const arr = readSwitchLog();
+  const last = arr[arr.length - 1];
+  if (!last || !switchLogT0) return;
+  if (last.r !== "-" && !text.startsWith("err")) return; // 最初の結果だけ残す(エラーは上書き)
+  last.r = `${text} +${Date.now() - switchLogT0}ms`;
+  writeSwitchLog(arr);
+}
+function renderSwitchLog() {
+  const pre = document.getElementById("switch-log");
+  if (!pre) return;
+  const arr = readSwitchLog().slice().reverse();
+  pre.textContent = arr.length === 0 ? "(まだ記録がありません)" :
+    "時刻 / 背景=1なら画面オフ中 / mem=1なら先読み済み / 結果\n" +
+    arr.map((e) => `${e.at} 背景${e.bg} mem${e.mem} ${e.r}  → ${e.to}`).join("\n");
+}
+
 /* ---------- Init ---------- */
 (async function init() {
   if ("serviceWorker" in navigator) {
@@ -186,10 +255,15 @@ function switchView(view) {
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   document.getElementById("view-" + view).classList.remove("hidden");
+  if (view === "library") renderSwitchLog();
 }
 
 /* ---------- ライブラリ(パック取り込み) ---------- */
 function wireLibrary() {
+  document.getElementById("switch-log-clear").addEventListener("click", () => {
+    localStorage.removeItem(SWITCH_LOG_KEY);
+    renderSwitchLog();
+  });
   document.getElementById("pack-input").addEventListener("change", async (ev) => {
     const files = [...ev.target.files];
     ev.target.value = "";
@@ -390,6 +464,7 @@ function wirePlayer() {
     updateSeekUI();
   });
   audio.addEventListener("play", () => renderPlayButton(true));
+  audio.addEventListener("playing", () => { if (switchLogT0) setSwitchResult("playing"); });
   audio.addEventListener("pause", () => renderPlayButton(false));
   // 音声の読み込み失敗を無音で放置しない(データ破損時に気づけるようにする)
   audio.addEventListener("error", () => {
@@ -406,9 +481,9 @@ function wirePlayer() {
       const p = audio.play();
       if (p) p.catch(() => renderPlayButton(false));
     } else if (currentIdx + 1 < queue.length) {
-      playTrackAt(currentIdx + 1);
+      playTrackAt(currentIdx + 1, true);
     } else if (repeatMode === "all" && queue.length > 0) {
-      playTrackAt(0);
+      playTrackAt(0, true);
     } else {
       renderPlayButton(false);
     }
@@ -533,17 +608,20 @@ async function toggleFavorite() {
 
 // idx番目のトラックを即座に再生する。endedハンドラからも呼ばれるため、この関数は同期で完結させる
 // (blob URLの生成は同期API。IndexedDBアクセスや動的importを挟んではいけない)。
-function playTrackAt(idx) {
+// auto=true は ended からの自動切り替え(切り替えログに記録する)。
+function playTrackAt(idx, auto) {
   if (idx < 0 || idx >= queue.length) return;
   currentIdx = idx;
   const t = queue[idx];
+  if (auto) logSwitch(t); else switchLogT0 = 0;
   audio.src = urlFor(t);
   audio.playbackRate = speed;
   const p = audio.play();
-  if (p) p.catch(() => renderPlayButton(false)); // 自動再生がブロックされた場合はボタン表示だけ戻す
-  // 次のトラックのblob URLを先に作っておく(ended時の処理を確実に同期で済ませるため)
+  if (p) p.catch((err) => { renderPlayButton(false); if (auto) setSwitchResult("err:" + (err && err.name)); }); // 自動再生がブロックされた場合はボタン表示だけ戻す
+  // 次のトラックのblob URLを先に作り(ended時の処理を確実に同期で済ませるため)、音声データもメモリへ先読みする
   const next = queue[idx + 1] || (repeatMode === "all" ? queue[0] : null);
-  if (next) urlFor(next);
+  if (next) { urlFor(next); preloadIntoMemory(next); }
+  trimMemory([t.id, next ? next.id : null]);
   localStorage.setItem("kkp_lastTrackId", t.id);
   localStorage.setItem("kkp_lastPos", "0");
   updateNowPlaying(t);
@@ -577,6 +655,9 @@ function togglePlay() {
   }
   if (audio.paused) {
     audio.play().catch(() => {});
+    // 前回の続きから再開したときは、まだ次トラックを先読みしていない
+    const next = queue[currentIdx + 1] || (repeatMode === "all" ? queue[0] : null);
+    if (next) preloadIntoMemory(next);
   } else {
     audio.pause();
     localStorage.setItem("kkp_lastPos", String(audio.currentTime));

@@ -148,3 +148,6 @@ body {
 hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 .update-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .version-line { margin-top: 20px; }
+
+.switch-log-box { margin-top: 12px; }
+.switch-log { font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; color: var(--text-muted); max-height: 40vh; overflow: auto; margin: 8px 0; }
