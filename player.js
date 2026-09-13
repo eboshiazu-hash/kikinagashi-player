@@ -5,14 +5,10 @@
    - PC側で生成したパック(.kkpack)を取り込み、IndexedDBに保存して
      完全オフライン・バックグラウンドで連続再生する。
    - iOS対策の要点:
-     * <audio>要素を2つ用意し、再生中に次のトラックを裏側の要素へ先読み(load)しておく。
-       切り替え時はsrcを差し替えず、先読み済みの要素をplay()するだけにして空白をなくす
-       (src差し替え→再生可能までの空白をiOSが「停止」とみなしてバックグラウンド再生権を
-       落とすことがあったため。2026-09-13・v9)
-     * endedハンドラでは同期処理だけで次トラックへ進める
+     * 単一の<audio>要素を使い回す(自動再生制約は初回タップで解除)
+     * endedハンドラでは同期処理だけで次トラックのsrc差し替え+play()を行う
        (awaitを挟むとバックグラウンドで再生権を失うことがある)
      * blob URLは事前に作成してキャッシュしておく
-     * 裏側の要素は初回のタップ時に無音でplay()→pause()して自動再生制約を解除しておく
    ========================================================= */
 
 /* ---------- IndexedDB ---------- */
@@ -136,11 +132,7 @@ let speed = 1.0;
 let shuffleOn = false;
 let repeatMode = "all"; // "all"(全体リピート・既定) | "one"(1曲リピート) | "off"
 const urlCache = new Map(); // trackId -> blob URL(セッション中は保持。endedハンドラを同期に保つため)
-// 2つの<audio>を交互に使う。audio=いま鳴らしている要素 / standby=次のトラックを先読みしてある要素
-const audioElements = [document.getElementById("audio"), document.getElementById("audio2")];
-let audio = audioElements[0];
-let standby = audioElements[1];
-let standbyTrackId = null; // standbyに先読み済みのトラックid(未準備ならnull)
+const audio = document.getElementById("audio");
 
 function urlFor(track) {
   let url = urlCache.get(track.id);
@@ -359,14 +351,12 @@ function wirePlayer() {
     shuffleOn = !shuffleOn;
     localStorage.setItem("kkp_shuffle", shuffleOn ? "1" : "0");
     rebuildQueue(true);
-    prepareNext();
     renderOptionButtons();
   });
   // リピートは 全体 → 1曲 → オフ の3段階切替(1つの論証を集中して覚えたいときは「1曲」)
   document.getElementById("repeat-btn").addEventListener("click", () => {
     repeatMode = repeatMode === "all" ? "one" : repeatMode === "one" ? "off" : "all";
     localStorage.setItem("kkp_repeatMode", repeatMode);
-    prepareNext(); // 末尾で「オフ→全体」に変えたときなど、次のトラックが変わる
     renderOptionButtons();
   });
   // 速度は4ボタンから直接選択(巡回式だと目的の速度に行くまで別速度を経由して聞き逃すため)
@@ -374,7 +364,7 @@ function wirePlayer() {
     btn.addEventListener("click", () => {
       speed = Number(btn.dataset.speed);
       localStorage.setItem("kkp_speed", String(speed));
-      for (const el of audioElements) el.playbackRate = speed;
+      audio.playbackRate = speed;
       renderOptionButtons();
     });
   });
@@ -384,70 +374,45 @@ function wirePlayer() {
     if (isFinite(audio.duration)) audio.currentTime = (seekbar.value / 100) * audio.duration;
   });
 
-  // 再生位置の保存(5秒スロットル)と表示更新。
-  // イベントは2つの要素の両方に付け、裏側(standby)の要素から来たものは無視する
-  // (先読みの解除操作でもplay/pauseイベントが出るため)。
+  // 再生位置の保存(5秒スロットル)と表示更新
   let lastSaved = 0;
-  for (const el of audioElements) {
-    el.addEventListener("timeupdate", () => {
-      if (el !== audio) return;
-      updateSeekUI();
-      const now = Date.now();
-      if (now - lastSaved > 5000 && nowTrack) {
-        lastSaved = now;
-        localStorage.setItem("kkp_lastPos", String(audio.currentTime));
-      }
-      updatePositionState();
-    });
-    el.addEventListener("loadedmetadata", () => {
-      el.playbackRate = speed; // src差し替えでリセットされるブラウザがあるため再設定(裏側の要素も同じ速度にしておく)
-      if (el === audio) updateSeekUI();
-    });
-    el.addEventListener("play", () => { if (el === audio) renderPlayButton(true); });
-    el.addEventListener("pause", () => { if (el === audio) renderPlayButton(false); });
-    // 音声の読み込み失敗を無音で放置しない(データ破損時に気づけるようにする)
-    el.addEventListener("error", () => {
-      if (el !== audio || !nowTrack) return;
+  audio.addEventListener("timeupdate", () => {
+    updateSeekUI();
+    const now = Date.now();
+    if (now - lastSaved > 5000 && nowTrack) {
+      lastSaved = now;
+      localStorage.setItem("kkp_lastPos", String(audio.currentTime));
+    }
+    updatePositionState();
+  });
+  audio.addEventListener("loadedmetadata", () => {
+    audio.playbackRate = speed; // src差し替えでリセットされるブラウザがあるため再設定
+    updateSeekUI();
+  });
+  audio.addEventListener("play", () => renderPlayButton(true));
+  audio.addEventListener("pause", () => renderPlayButton(false));
+  // 音声の読み込み失敗を無音で放置しない(データ破損時に気づけるようにする)
+  audio.addEventListener("error", () => {
+    if (!nowTrack) return;
+    renderPlayButton(false);
+    document.getElementById("now-body").textContent =
+      "この音声を再生できませんでした。ライブラリで科目を削除し、パックを取り込み直してください。";
+  });
+
+  // ★ 連続再生の核心。バックグラウンドでも次トラックへ進めるよう、ここは同期処理のみにする。
+  audio.addEventListener("ended", () => {
+    if (repeatMode === "one" && nowTrack) {
+      audio.currentTime = 0;
+      const p = audio.play();
+      if (p) p.catch(() => renderPlayButton(false));
+    } else if (currentIdx + 1 < queue.length) {
+      playTrackAt(currentIdx + 1);
+    } else if (repeatMode === "all" && queue.length > 0) {
+      playTrackAt(0);
+    } else {
       renderPlayButton(false);
-      document.getElementById("now-body").textContent =
-        "この音声を再生できませんでした。ライブラリで科目を削除し、パックを取り込み直してください。";
-    });
-
-    // ★ 連続再生の核心。バックグラウンドでも次トラックへ進めるよう、ここは同期処理のみにする。
-    el.addEventListener("ended", () => {
-      if (el !== audio) return;
-      if (repeatMode === "one" && nowTrack) {
-        audio.currentTime = 0;
-        const p = audio.play();
-        if (p) p.catch(() => renderPlayButton(false));
-      } else if (currentIdx + 1 < queue.length) {
-        playTrackAt(currentIdx + 1);
-      } else if (repeatMode === "all" && queue.length > 0) {
-        playTrackAt(0);
-      } else {
-        renderPlayButton(false);
-      }
-    });
-  }
-
-  // 画面上の操作(=ユーザー操作)のあとに、裏側の要素の自動再生制約を解除しておく。
-  // iOSは要素ごとにタップでの解除が要るため、standbyもタップの中で一度play()しておかないと
-  // endedからのplay()が拒否されることがある。
-  document.getElementById("player-main").addEventListener("click", unlockAudioElements);
-}
-
-// タップの中で呼ぶ。srcのある未解除の要素を無音でplay()→即pause()して制約を外す(音は鳴らない)。
-function unlockAudioElements() {
-  for (const el of audioElements) {
-    if (el.dataset.unlocked === "1" || !el.getAttribute("src")) continue;
-    if (el === audio && !el.paused) { el.dataset.unlocked = "1"; continue; } // 再生中=解除済み
-    el.muted = true;
-    const p = el.play();
-    el.pause();
-    el.muted = false;
-    if (p) p.catch(() => {});
-    el.dataset.unlocked = "1";
-  }
+    }
+  });
 }
 
 function renderSubjectSelect() {
@@ -561,7 +526,6 @@ async function toggleFavorite() {
       }
     }
   }
-  prepareNext(); // キューの出し入れで次のトラックが変わる
   renderFavButton();
   renderSubjectSelect();
   renderQueueList();
@@ -569,52 +533,21 @@ async function toggleFavorite() {
 
 // idx番目のトラックを即座に再生する。endedハンドラからも呼ばれるため、この関数は同期で完結させる
 // (blob URLの生成は同期API。IndexedDBアクセスや動的importを挟んではいけない)。
-// 目的のトラックがstandbyに先読み済みなら、srcを差し替えずに要素を入れ替えてplay()するだけにする。
 function playTrackAt(idx) {
   if (idx < 0 || idx >= queue.length) return;
   currentIdx = idx;
   const t = queue[idx];
-  if (standbyTrackId === t.id && standby.getAttribute("src")) {
-    // 先読み済み: 役割を交代(いままで鳴らしていた要素は次の先読みに使う)
-    audio.pause();
-    [audio, standby] = [standby, audio];
-    if (audio.currentTime > 0) audio.currentTime = 0;
-  } else {
-    audio.src = urlFor(t);
-  }
-  standbyTrackId = null;
+  audio.src = urlFor(t);
   audio.playbackRate = speed;
   const p = audio.play();
   if (p) p.catch(() => renderPlayButton(false)); // 自動再生がブロックされた場合はボタン表示だけ戻す
-  prepareNext();
+  // 次のトラックのblob URLを先に作っておく(ended時の処理を確実に同期で済ませるため)
+  const next = queue[idx + 1] || (repeatMode === "all" ? queue[0] : null);
+  if (next) urlFor(next);
   localStorage.setItem("kkp_lastTrackId", t.id);
   localStorage.setItem("kkp_lastPos", "0");
   updateNowPlaying(t);
   renderQueueList();
-}
-
-// いま鳴らしているトラックの「次」を返す(endedハンドラが進める先と同じ規則)。
-function nextTrack() {
-  if (currentIdx + 1 < queue.length) return queue[currentIdx + 1];
-  if (repeatMode === "all" && queue.length > 0) return queue[0];
-  return null;
-}
-
-// 次のトラックをstandbyに先読みしておく。既に同じトラックが準備済みなら何もしない。
-// endedハンドラの延長でも呼ばれるので同期処理のみ(load()は同期API)。
-function prepareNext() {
-  const next = nextTrack();
-  if (!next) {
-    if (standby.getAttribute("src")) standby.removeAttribute("src");
-    standbyTrackId = null;
-    return;
-  }
-  if (standbyTrackId === next.id) return;
-  standby.pause();
-  standby.src = urlFor(next);
-  standby.playbackRate = speed;
-  standby.load();
-  standbyTrackId = next.id;
 }
 
 function updateNowPlaying(t) {
@@ -644,7 +577,6 @@ function togglePlay() {
   }
   if (audio.paused) {
     audio.play().catch(() => {});
-    prepareNext(); // 前回の続きから再開したときはまだ先読みしていない
   } else {
     audio.pause();
     localStorage.setItem("kkp_lastPos", String(audio.currentTime));
@@ -675,8 +607,8 @@ function seekBy(delta) {
 }
 
 function stopPlayback() {
-  for (const el of audioElements) { el.pause(); el.removeAttribute("src"); }
-  standbyTrackId = null;
+  audio.pause();
+  audio.removeAttribute("src");
   currentIdx = -1;
   nowTrack = null;
   document.getElementById("now-subject").textContent = "";
